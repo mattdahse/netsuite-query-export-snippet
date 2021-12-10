@@ -156,7 +156,7 @@ require(['N/query'],(query)=>{
                 retrieved.
              */
             output += renderGetResultsFunction();
-            output += `<br /><br />\/\/ getAllMappedResults(root);`
+            output += `<br /><br />\/\/ getAllMappedResults(root);`;
             return output;
         }
 
@@ -344,7 +344,9 @@ require(['N/query'],(query)=>{
                 }
                 return text;
             });
-            return conditions.join(",<br>");
+            let allConditions = conditions.join(",<br />");
+            allConditions = allConditions.replace(/,<br \/>,<br \/>/g,",<br />");
+            return allConditions;
         }
 
         /**
@@ -413,7 +415,7 @@ require(['N/query'],(query)=>{
          *
          * I've found the autoJoin() behavior to be a little cryptic, and I've opted for
          * joinFrom and joinTo in favor of the more generic wrapper for consistency
-         * and reliability when a target or source is available.
+         * and reliability.
          *
          * @param component
          * @param parentName
@@ -421,7 +423,7 @@ require(['N/query'],(query)=>{
          */
         const renderJoinsForComponent = (component, parentName) => {
             if (!hasJoins(component)) {
-                return ``;
+                return "";
             }
             let keys = Object.keys(component.child);
             let output = ``;
