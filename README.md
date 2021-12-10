@@ -22,10 +22,10 @@ add dynamic conditions or columns and otherwise kick N/query butt.
 ### How do I use it? ###
 * Log into NetSuite with a role that has appropriate permissions for the query you wish to export.
 * Navigate to Analytics and either select an existing workbook or create one
-** The workbook must have a Table view
-** The workbook's columns should ideally be given custom labels (this will make for more intuitive code)
-** Note that the dataset's column labels do not matter (just the workbook's)
+* The workbook must have a Table view
+* The workbook's columns should ideally be given custom labels (this will make for more intuitive code)
+* Note that the dataset's column labels do not matter (just the workbook's)
 * Open the devtools console.
 * Right-click on the snippet name that you created during setup
-** click Run
+* click Run
 * Your code will be presented in a new tab.
