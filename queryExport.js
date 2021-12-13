@@ -92,8 +92,10 @@ require(['N/query'],(query)=>{
             const wb = query.load({
                 id: wbId
             });
+            const indent = space(4);
+            output += `const createQuery = () => {<br />${indent}`;
             output += renderRootQuery(wb);
-            output += `<br />\/\/ Root level joins`;
+            output += `<br />${indent}\/\/ Root level joins`;
             output += renderJoinsForComponent(wb, "root");
 
             /*
@@ -105,26 +107,26 @@ require(['N/query'],(query)=>{
                 let component = wb.child[key];
                 if (hasJoins(component)) {
                     const joinName = "root_" + component.type;
-                    output += `<br />\/\/ Level 1 joins under ${joinName}<br \>`
+                    output += `<br />${indent}\/\/ Level 1 joins under ${joinName}<br \>`
                     output += renderJoinsForComponent(component, joinName);
                     for (let deepKey in component.child) {
                         let deepComponent = component.child[deepKey];
                         if (hasJoins(deepComponent)) {
                             const deepName = joinName + "_" + deepComponent.type;
-                            output += `<br />\/\/ Level 2 joins under ${deepName}<br \>`
+                            output += `<br />${indent}\/\/ Level 2 joins under ${deepName}<br \>`
                             output += renderJoinsForComponent(deepComponent, deepName);
 
                             for (let deep3Key in deepComponent.child) {
                                 let deep3Component = deepComponent.child[deep3Key];
                                 if (hasJoins(deep3Component)) {
                                     const deep3Name = deepName + "_" + deep3Component.type;
-                                    output += `<br />\/\/ Level 3 joins under ${deep3Name}<br \>`
+                                    output += `<br />${indent}\/\/ Level 3 joins under ${deep3Name}<br \>`
                                     output += renderJoinsForComponent(deep3Component, deep3Name);
                                     for (let deep4Key in deep3Component.child) {
                                         let deep4Component = deep3Component.child[deep4Key];
                                         if (hasJoins(deep4Component)) {
                                             const deep4Name = deep3Name + "_" + deep3Component.type;
-                                            output += `<br />\/\/ Level 4 joins under ${deep4Name}<br />`;
+                                            output += `<br />${indent}\/\/ Level 4 joins under ${deep4Name}<br />`;
                                             output += renderJoinsForComponent(deep4Component, deep4Name);
                                         }
                                     }
@@ -135,20 +137,20 @@ require(['N/query'],(query)=>{
                 }
             }
 
-            output += `<br />\/\/ Conditions: <br />`;
+            output += `<br />${indent}\/\/ Conditions: <br />`;
             if (wb.condition) {
                 if (wb.condition.children) {
-                    output += `root.condition = root.${wb.condition.operator.toLowerCase()}(<br />`;
+                    output += `${indent}root.condition = root.${wb.condition.operator.toLowerCase()}(<br />`;
                     output += renderConditions(wb);
                     output += `);`;
                 } else { // only one condition
-                    output += `root.condition = ${renderCondition(wb.condition, space(1))};<br />`;
+                    output += `${indent}root.condition = ${renderCondition(wb.condition, space(1))};<br />`;
                 }
-            } else {
-                output += `\/\/ None.<br />`;
             }
 
             output += renderColumns(wb);
+
+            output += `${indent}return root;<br />}`;
 
             output += `<br /><br />\/\/ Function to get all results as mapped objects:<br />`;
             /*
@@ -156,7 +158,7 @@ require(['N/query'],(query)=>{
                 retrieved.
              */
             output += renderGetResultsFunction();
-            output += `<br /><br />\/\/ getAllMappedResults(root);`;
+            output += `<br /><br />\/\/ getAllMappedResults(createQuery());`;
             return output;
         }
 
@@ -177,15 +179,16 @@ require(['N/query'],(query)=>{
          * @returns {string}
          */
         const renderColumns = (wb) => {
-            let output = `<br />\/\/ Columns: <br />`;
-            output += `root.columns = [<br />`;
+            const indent = space(4);
+            let output = `<br />${indent}\/\/ Columns: <br />`;
+            output += `${indent}root.columns = [<br />`;
             let columns = [];
             const aliases = getAliasesForColumns(wb.columns);
             wb.columns.forEach((column, index) => {
                 columns.push(renderColumn(column, aliases[index]));
             });
-            output += columns.join(",<br />");
-            output += `<br />];<br />`;
+            output += columns.join(",<br />&nbsp;&nbsp;&nbsp;&nbsp;");
+            output += `<br />${indent}];<br />`;
             return output;
         }
 
@@ -319,7 +322,7 @@ require(['N/query'],(query)=>{
          * @returns {string}
          */
         const renderRootQuery = (wb) => {
-            let output = `const root = query.create({ type: "${wb.type}"});<br />`;
+            let output = `${space(4)}const root = query.create({ type: "${wb.type}"});<br />`;
             return output;
         }
 
@@ -358,11 +361,11 @@ require(['N/query'],(query)=>{
          */
         const renderConditions = (wb, startingIndent) => {
 
-            let indent = startingIndent || space(4);
+            let indent = startingIndent || space(8);
             if (wb.condition.children) {
                 return renderConditionGroup(wb.condition.children, indent, wb.condition.operator.toLowerCase());
             } else if (["AND", "NOT", "OR"].indexOf(wb.condition.operator) == -1) {
-                return renderCondition(wb.condition, space(4));
+                return renderCondition(wb.condition, space(8));
             }
         }
 
@@ -394,7 +397,7 @@ require(['N/query'],(query)=>{
             output += `${n + space(4)}operator: "${condition.operator}",<br />`;
             output += `${n + space(4)}values: ${JSON.stringify(condition.values)}<br />`;
 
-            output += `${n}})`;
+            output += `${n + space(4)}})`;
             return output;
         }
 
@@ -423,7 +426,7 @@ require(['N/query'],(query)=>{
          */
         const renderJoinsForComponent = (component, parentName) => {
             if (!hasJoins(component)) {
-                return "";
+                return ``;
             }
             let keys = Object.keys(component.child);
             let output = ``;
@@ -446,9 +449,9 @@ require(['N/query'],(query)=>{
             let output = ``;
             const type = wb.child[key].type;
             const name = parentName !== "root" ? `${parentName}_${type}` : `${type}`;
-            output += `<br />const ${name.replace("root_", "")} = ${parentName.replace("root_", "")}.joinTo({<br />
-            ${space(4)}fieldId: "${type}",<br />
-            ${space(4)}target: "${wb.child[key].target}"<br />
+            output += `<br />${space(4)}const ${name.replace("root_", "")} = ${parentName.replace("root_", "")}.joinTo({<br />
+            ${space(12)}fieldId: "${type}",<br />
+            ${space(12)}target: "${wb.child[key].target}"<br />${space(4)}
             });<br />`;
             return output;
         }
@@ -465,9 +468,9 @@ require(['N/query'],(query)=>{
             let output = ``;
             const type = wb.child[key].type;
             const name = parentName !== "root" ? `${parentName}_${type}` : `${type}`;
-            output += `<br />const ${name.replace("root_", "")} = ${parentName.replace("root_", "")}.joinFrom({<br />
-            ${space(8)}fieldId: "${type}"<br />
-            ${space(4)}source: "${wb.child[key].source}"<br />
+            output += `<br />${space(4)}const ${name.replace("root_", "")} = ${parentName.replace("root_", "")}.joinFrom({<br />
+            ${space(12)}fieldId: "${type}"<br />
+            ${space(12)}source: "${wb.child[key].source}"<br />${space(4)}
             });<br />`;
             return output;
         }
@@ -492,8 +495,8 @@ require(['N/query'],(query)=>{
             let output = ``;
             const type = wb.child[key].type;
             const name = parentName !== "root" ? `${parentName}_${type}` : `${type}`;
-            output += `<br />const ${name.replace("root_", "")} = ${parentName.replace("root_", "")}.autoJoin({<br />
-            ${space(8)}fieldId: "${type}"<br />
+            output += `<br />${space(4)}const ${name.replace("root_", "")} = ${parentName.replace("root_", "")}.autoJoin({<br />
+            ${space(12)}fieldId: "${type}"<br />${space(4)}
             });<br />`;
             return output;
         }
