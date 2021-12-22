@@ -1,553 +1,481 @@
 /**
- * This is designed to run in the browser console when logged in and
- * on a saved workbook page.  The workbook must have a table view defined,
- * and must have already been saved.
- *
- * It is recommended that you add this code as a "New snippet" in your Chrome
- * devtools console.
- * Find "Sources" in the console tab
- * Find "Snippets", under Sources
- * click the plus sign,
- * paste in this code in the window.
- * rename the snippet to something like Query Export
- * Save the snippet with ctrl+s or cmd+s
- *
- * Navigate in NetSuite under a valid role to Analytics and select a workbook
- * Right-click the snippet and click Run to export it to SuiteScript 2.1 in a new tab.
- *
- * @author Matt Dahse
+ * This snippet is designed to run in the Chrome (or similar) browser console, while
+ * the user is on a dataset page - the dataset should be saved and should not be a
+ * premade template.
+ * @type {string}
  */
-require(['N/query', 'N/dataset'],(query, dataset)=>{
-    let href = window.location.href;
-    let parts = href.split(/[\=\&\?]/);
-    let wbIndex = parts.indexOf("workbook");
+require(['N/query', 'N/dataset'], (query, dataset) => {
 
-    if (href.indexOf("netsuite") === -1 || href.indexOf('workbook=') === -1) {
-        alert("This extension only works on NetSuite workbook pages when a workbook has been saved.");
-        return;
-    } else {
-
-        let id = parts[wbIndex + 1];
-        const getAllMappedResults = (wb) => {
-            const pageData = wb.runPaged({pageSize: 1000});
-            let allResults = [];
-            const allPages = [];
-            pageData.iterator().each((page) => {
-                let currentPage = page.value;
-                allPages.push(currentPage.data);
-                return true;
-            });
-            allPages.forEach((page) => {
-                allResults = allResults.concat(page.asMappedResults());
-            });
-            return allResults;
+    let datasetName = document.getElementsByTagName("h2")[1].innerText;
+    /**
+     * This function assists in displaying the rendered code with indents, adding
+     * a specified number of non-breaking space html entities to the output where
+     * called.
+     *
+     * @param n
+     * @returns {string}
+     */
+    const space = (n) => {
+        let output = "";
+        for (let i = 0; i < n; i++) {
+            output += "&nbsp;";
         }
-
-        /**
-         * This function gets the script id of a workbook from its internalid
-         * which can be extracted from the current URL.
-         *
-         * This is also, incidentally, an example the output of the export snippet,
-         * as it was created with this tool.
-         *
-         * @param id
-         * @returns {string}
-         */
-        const getWbId = (id) => {
-            const root = query.create({type: "usrsavedsearch"});
-            root.condition = root.createCondition({
-                fieldId: "internalid",
-                operator: "ANY_OF",
-                values: [String(id)]
-            });
-            root.columns = [
-                root.createColumn({
-                    label: "Internal ID",
-                    fieldId: "internalid",
-                    alias: "INTERNAL_ID"
-                }),
-                root.createColumn({
-                    label: "Name",
-                    fieldId: "name",
-                    alias: "NAME"
-                }),
-                root.createColumn({
-                    label: "Script ID",
-                    fieldId: "scriptid",
-                    alias: "SCRIPT_ID"
-                })
-            ];
-            const results = getAllMappedResults(root);
-            return results[0].SCRIPT_ID.toLowerCase();
-        }
-
-        /**
-         * This is the main function of the tool, which composes a readable
-         * blob of code based on the workbook
-         * @param wbId {string} - this is the scriptid of the workbook like "custworkbook18"
-         * @returns {string}
-         */
-        const decomposeQuery = (wbId) => {
-            let output = "";
-            const wb = query.load({
-                id: wbId
-            });
-            const indent = space(4);
-            output += `const createQuery = () => {<br />${indent}`;
-            output += renderRootQuery(wb);
-            output += `<br />${indent}\/\/ Root level joins`;
-            output += renderJoinsForComponent(wb, "root");
-
-            /*
-                Ideally, this would use a recursive function to go infinitely deep,
-                but I couldn't wrap my head around how to do that, so this supports
-                up to 4 levels of joins via some unholy nested loops.
-             */
-            for (let key in wb.child) {
-                let component = wb.child[key];
-                if (hasJoins(component)) {
-                    const joinName = "root_" + component.type;
-                    output += `<br />${indent}\/\/ Level 1 joins under ${joinName}<br \>`
-                    output += renderJoinsForComponent(component, joinName);
-                    for (let deepKey in component.child) {
-                        let deepComponent = component.child[deepKey];
-                        if (hasJoins(deepComponent)) {
-                            const deepName = joinName + "_" + deepComponent.type;
-                            output += `<br />${indent}\/\/ Level 2 joins under ${deepName}<br \>`
-                            output += renderJoinsForComponent(deepComponent, deepName);
-
-                            for (let deep3Key in deepComponent.child) {
-                                let deep3Component = deepComponent.child[deep3Key];
-                                if (hasJoins(deep3Component)) {
-                                    const deep3Name = deepName + "_" + deep3Component.type;
-                                    output += `<br />${indent}\/\/ Level 3 joins under ${deep3Name}<br \>`
-                                    output += renderJoinsForComponent(deep3Component, deep3Name);
-                                    for (let deep4Key in deep3Component.child) {
-                                        let deep4Component = deep3Component.child[deep4Key];
-                                        if (hasJoins(deep4Component)) {
-                                            const deep4Name = deep3Name + "_" + deep3Component.type;
-                                            output += `<br />${indent}\/\/ Level 4 joins under ${deep4Name}<br />`;
-                                            output += renderJoinsForComponent(deep4Component, deep4Name);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            output += `<br />${indent}\/\/ Conditions: <br />`;
-            if (wb.condition) {
-                if (wb.condition.children) {
-                    output += `${indent}root.condition = root.${wb.condition.operator.toLowerCase()}(<br />`;
-                    output += renderConditions(wb);
-                    output += `);`;
-                } else { // only one condition
-                    output += `${indent}root.condition = ${renderCondition(wb.condition, space(1))};<br />`;
-                }
-            }
-
-            output += renderColumns(wb);
-
-            output += `${indent}return root;<br />}`;
-
-            output += `<br /><br />\/\/ Function to get all results as mapped objects:<br />`;
-            /*
-                For convenience, so the code can be copied into the console and results
-                retrieved.
-             */
-            output += renderGetResultsFunction();
-            output += `<br /><br />\/\/ getAllMappedResults(createQuery());`;
-            return output;
-        }
-
-        /**
-         * This function renders the code to create all of the columns.  Additional
-         * columns are injected for list/select options to get the ids of the
-         * values, so you don't have to make separate columns for the display
-         * name of your values, and their ids.
-         *
-         * The columns are given an alias that is either based on the label you assign
-         * in the UI when saving the workbook, or they are generated programmatically
-         * based on the field id, or the formula type.
-         *
-         * Note, these aliases will get ugly, and I recommend creating labels to avoid
-         * some really long aliases.
-         *
-         * @param wb {N/query.Query}
-         * @returns {string}
-         */
-        const renderColumns = (wb) => {
-            const indent = space(4);
-            let output = `<br />${indent}\/\/ Columns: <br />`;
-            output += `${indent}root.columns = [<br />`;
-            let columns = [];
-            const aliases = getAliasesForColumns(wb.columns);
-            wb.columns.forEach((column, index) => {
-                columns.push(renderColumn(column, aliases[index]));
-            });
-            output += columns.join(",<br />&nbsp;&nbsp;&nbsp;&nbsp;");
-            output += `<br />${indent}];<br />`;
-            return output;
-        }
-
-        /**
-         * This function renders an individual column.
-         *
-         * @param col
-         * @param alias
-         * @param isRaw
-         * @returns {string}
-         */
-        const renderColumn = (col, alias, isRaw) => {
-            const n = space(8);
-            const thisAlias = isRaw ? `${alias}_RAW` : alias;
-            let needsRawColumn = false;
-            let output = `${space(4)}${getComponentName(col)}.createColumn({<br />`;
-
-            if (col.label) {
-                output += `${n}label: "${col.label}",<br />`;
-            }
-            if (col.fieldId) {
-                output += `${n}fieldId: "${col.fieldId}",<br />`;
-            }
-            if (col.formula) {
-                output += `${n}formula: "${col.formula}",<br />`;
-                output += `${n}type: "${col.type}",<br />`;
-            }
-            if (col.aggregate) {
-                output += `${n}aggregate: "${col.aggregate}",<br />`;
-            }
-            if (col.groupBy) {
-                output += `${n}groupBy: "${col.groupBy}",<br />`;
-            }
-            if (!isRaw && col.context && col.context.name === "DISPLAY") {
-                output += `${n}context: {<br />${space(12)}name: "DISPLAY"<br />${n}},<br />`;
-                needsRawColumn = true;
-            }
-            if (isRaw) {
-                output += `${n}context: {<br />${space(12)}name: "RAW"<br />${n}},<br />`;
-            }
-            output += `${n}alias: "${thisAlias}"<br />`;
-            output += `${space(4)}})`;
-            if (!isRaw && needsRawColumn) {
-                output += `, <br />`;
-                output += renderColumn(col, alias, true);
-            }
-
-            return output;
-        }
-
-        /**
-         * This function creates an array of aliases for the (original) columns of the
-         * loaded workbook.  Columns that are injected to get the IDs of select values
-         * will have a _RAW suffix.
-         *
-         * This function works hard to avoid duplicate aliases, but please do yourself
-         * a favor and give your columns unique labels in the UI when saving the workbook
-         * (NOT the dataset, the workbook!).
-         *
-         * @param columns
-         * @returns {*}
-         */
-        const getAliasesForColumns = (columns) => {
-            const aliases = columns.map((column) => {
-
-                if (column.label) {
-                    return column.label.toUpperCase().replace(/\s/g, "_");
-                }
-                // If no label, try and fall back to the field id
-                if (column.fieldId) {
-                    return column.fieldId.toUpperCase();
-                }
-                // If no field id, this is a formula - compose something from its type
-                return `FORMULA_${column.type}`;
-            });
-
-            // Now ensure uniqueness of each member in the array
-            for (let i = 0; i < aliases.length; i++) {
-                let firstIndex = aliases.indexOf(aliases[i]);
-                if (firstIndex < i && !columns[i].formula) {
-                    aliases[firstIndex] = getComponentName(columns[firstIndex]).toUpperCase() + "_" + aliases[firstIndex];
-                    aliases[i] = getComponentName(columns[i]).toUpperCase() + "_" + aliases[i];
-                } else if (firstIndex < i) { // duplicate formula
-                    let count = 0;
-                    let j = firstIndex;
-                    while (j <= i) {
-                        if (aliases[j] === aliases[i]) {
-                            count++;
-                            aliases[j] += `_${count}`;
-                        }
-                        j++;
-                    }
-                }
-            }
-            return aliases;
-        }
-
-        /**
-         * This function goes digging in an object's parentage to compose
-         * a name that takes it back to the root.  This name is the variable
-         * name assigned to the join that created this condition or column.
-         *
-         * Columns and Conditions of the main query are from "root" which is
-         * the variable name of that object.
-         *
-         * @param obj
-         * @returns {string}
-         */
-        const getComponentName = (obj) => {
-            if (!obj.component) {
-                return obj.operator || "Unknown";
-            }
-            let parent = obj.component.parent;
-            if (!parent) {
-                return "root";
-            }
-            let name = [obj.component.type];
-            while (parent) {
-                if (parent.parent) { // don't add the root type to the name
-                    name.unshift(parent.type);
-                }
-                parent = parent.parent;
-            }
-            return name.join("_");
-        }
-
-        /**
-         * This function starts the party.
-         *
-         * @param wb
-         * @returns {string}
-         */
-        const renderRootQuery = (wb) => {
-            let output = `${space(4)}const root = query.create({ type: "${wb.type}"});<br />`;
-            return output;
-        }
-
-        /**
-         * This function renders a condition group, which is to say, a list of conditions
-         * within a single logical operator (and, or, not), and it calls itself
-         * recursively to render deeper groups (an "or" within an "and", etc)
-         *
-         * @param group
-         * @param startingIndent
-         * @param operator
-         * @returns {*}
-         */
-        const renderConditionGroup = (group, startingIndent, operator) => {
-            let n = startingIndent + space(4);
-            let conditions = group.map((condition) => {
-                let text = renderCondition(condition, n);
-                if (["and", "or", "not"].indexOf(text) > -1) {
-                    let groupText = `${n}root.${text}(<br />`;
-                    groupText += renderConditionGroup(condition.children, n + space(4), text) + `<br />${n}),<br />`;
-                    return groupText;
-                }
-                return text;
-            });
-            let allConditions = conditions.join(",<br />");
-            allConditions = allConditions.replace(/,<br \/>,<br \/>/g,",<br />");
-            return allConditions;
-        }
-
-        /**
-         * This is the top level function that gets the condition groups, if any, or
-         * renders the single condition, if there is only one.
-         * @param wb
-         * @param startingIndent
-         * @returns {string|string|*}
-         */
-        const renderConditions = (wb, startingIndent) => {
-
-            let indent = startingIndent || space(8);
-            if (wb.condition.children) {
-                return renderConditionGroup(wb.condition.children, indent, wb.condition.operator.toLowerCase());
-            } else if (["AND", "NOT", "OR"].indexOf(wb.condition.operator) == -1) {
-                return renderCondition(wb.condition, space(8));
-            }
-        }
-
-        /**
-         * This is a bottom level function that makes a condition appear pretty on the
-         * page
-         *
-         * @param condition {N/query.Condition}
-         * @param n {string} A number of non-breaking space html entities representing the indent level
-         */
-        const renderCondition = (condition, n) => {
-            const componentName = getComponentName(condition);
-            if (["AND", "OR", "NOT"].indexOf(componentName) > -1) {
-                return componentName.toLowerCase();
-            }
-            let output = `${n}${componentName}.createCondition({<br />`;
-            if (condition.fieldId) {
-                output += `${n + space(4)}fieldId: "${condition.fieldId}",<br />`;
-            }
-            if (condition.formula) {
-                output += `${n + space(4)}formula: "${condition.formula}",<br />`;
-            }
-            if (condition.type) {
-                output += `${n + space(4)}type: "${condition.type}",<br />`;
-            }
-            if (condition.aggregate) {
-                output += `${n + space(4)}aggregate: "${condition.aggregate}",<br />`;
-            }
-            output += `${n + space(4)}operator: "${condition.operator}",<br />`;
-            output += `${n + space(4)}values: ${JSON.stringify(condition.values)}<br />`;
-
-            output += `${n + space(4)}})`;
-            return output;
-        }
-
-        /**
-         * A simple function to determine if a component has any joins under it.
-         *
-         * @param component
-         * @returns {boolean}
-         */
-        const hasJoins = (component) => {
-            const numChildren = Object.keys(component.child).length;
-            return Boolean(numChildren);
-        }
-
-        /**
-         * This function writes the code that renders the joins that are attached
-         * to (created from) a component.
-         *
-         * I've found the autoJoin() behavior to be a little cryptic, and I've opted for
-         * joinFrom and joinTo in favor of the more generic wrapper for consistency
-         * and reliability.
-         *
-         * @param component
-         * @param parentName
-         * @returns {string}
-         */
-        const renderJoinsForComponent = (component, parentName) => {
-            if (!hasJoins(component)) {
-                return ``;
-            }
-            let keys = Object.keys(component.child);
-            let output = ``;
-            keys.forEach((join) => {
-                output += renderJoin(component, join, parentName);
-            });
-            return output;
-        }
-
-        /**
-         * This function renders a joinTo, where the joined component is linked via
-         * a field on the parent.
-         *
-         * @param wb
-         * @param key
-         * @param parentName
-         * @returns {string}
-         */
-        const renderJoinTo = (wb, key, parentName) => {
-            let output = ``;
-            const type = wb.child[key].type;
-            const name = parentName !== "root" ? `${parentName}_${type}` : `${type}`;
-            output += `<br />${space(4)}const ${name.replace("root_", "")} = ${parentName.replace("root_", "")}.joinTo({<br />
-            ${space(12)}fieldId: "${type}",<br />
-            ${space(12)}target: "${wb.child[key].target}"<br />${space(4)}
-            });<br />`;
-            return output;
-        }
-
-        /**
-         * This function renders a joinFrom, where the joined component is linked via
-         * a field on the target record.
-         * @param wb
-         * @param key
-         * @param parentName
-         * @returns {string}
-         */
-        const renderJoinFrom = (wb, key, parentName) => {
-            let output = ``;
-            const type = wb.child[key].type;
-            const name = parentName !== "root" ? `${parentName}_${type}` : `${type}`;
-            output += `<br />${space(4)}const ${name.replace("root_", "")} = ${parentName.replace("root_", "")}.joinFrom({<br />
-            ${space(12)}fieldId: "${type}"<br />
-            ${space(12)}source: "${wb.child[key].source}"<br />${space(4)}
-            });<br />`;
-            return output;
-        }
-
-        /**
-         * This function decides whether to render a joinTo or a joinFrom based on whether
-         * the join has a target or a source.
-         *
-         * @param wb
-         * @param key
-         * @param parentName
-         * @returns {string}
-         */
-        const renderJoin = (wb, key, parentName) => {
-            let join = wb.child[key];
-            if (join.source) {
-                return renderJoinFrom(wb, key, parentName);
-            }
-            if (join.target) {
-                return renderJoinTo(wb, key, parentName);
-            }
-            let output = ``;
-            const type = wb.child[key].type;
-            const name = parentName !== "root" ? `${parentName}_${type}` : `${type}`;
-            output += `<br />${space(4)}const ${name.replace("root_", "")} = ${parentName.replace("root_", "")}.autoJoin({<br />
-            ${space(12)}fieldId: "${type}"<br />${space(4)}
-            });<br />`;
-            return output;
-        }
-
-        /**
-         * This function assists in displaying the rendered code with indents, adding
-         * a specified number of non-breaking space html entities to the output where
-         * called.
-         *
-         * @param n
-         * @returns {string}
-         */
-        const space = (n) => {
-            let output = "";
-            for (let i = 0; i < n; i++) {
-                output += "&nbsp;";
-            }
-            return output;
-        }
-
-        /**
-         * This function creates the code for a handy query utility function to get
-         * all results of a given query as mapped results.
-         *
-         * The resulting function is actually called at the top of this file, which
-         * is pretty meta when you think about it.
-         *
-         * @returns {string}
-         */
-        const renderGetResultsFunction = () => {
-            return `const getAllMappedResults = (wb) => {<br />
-            ${space(4)}const pageData = wb.runPaged({pageSize: 1000});<br />
-            ${space(4)}let allResults = [];<br />
-            ${space(4)}const allPages = [];<br />
-            ${space(4)}pageData.iterator().each((page)=>{<br />
-            ${space(8)}    let currentPage = page.value;<br />
-            ${space(8)}    allPages.push(currentPage.data);<br />
-            ${space(8)}    return true;<br />
-            ${space(4)}});<br />
-            ${space(4)}allPages.forEach((page) => {<br />
-            ${space(8)}    allResults = allResults.concat(page.asMappedResults());<br />
-            ${space(4)}});<br />
-            ${space(4)}return allResults;<br />
-             }<br />`
-        }
-
-        // This is the code that is called in the console when the snippet is run.
-        let workbookId = getWbId(id);
-        let html = decomposeQuery(workbookId);
-        const popup = window.open("", "_blank");
-        popup.document.body.innerHTML = html;
+        return output;
     }
-});
 
+    /**
+     * This function helps to trim trailing commas where properties or members
+     * are added to a parent object.
+     *
+     * @param str
+     * @returns {*}
+     */
+    const trimComma = (str) => {
+        return str.replace(/,<br \/>$/, "<br />");
+    }
+
+    /**
+     * Given a dataset name, find the first match in the dataset list that has
+     * a give name and return its scriptId so it can be loaded.
+     *
+     * @param name
+     * @returns {*}
+     */
+    const getDatasetId = (name) => {
+        const pageData = dataset.listPaged();
+        let allResults = [];
+
+        pageData.pageRanges.forEach((range, i)=>{
+            allResults = allResults.concat(pageData.fetch(i).data);
+        });
+
+        for (let i = 0; i < allResults.length; i++) {
+            if (allResults[i].name === name) {
+                return allResults[i].id;
+            }
+        }
+        alert ("Cannot find dataset.  Are you on a dataset page and have you saved the dataset yet?");
+    }
+
+    /**
+     * This function gets the joins within a column.  In a dataset, all joins are defined as
+     * part of a column object.  Column objects are not only the results shown when a dataset is
+     * run, but also form an essential part of the conditions for a dataset.
+     *
+     * @param col
+     * @param joins
+     */
+    const getJoinsForColumn = (col, joins) => {
+        const joinList = [];
+        if (col.join) {
+            let currentJoin = col.join;
+            while(currentJoin) {
+                joinList.push(currentJoin);
+                currentJoin = currentJoin.join;
+            }
+        }
+        let names = [];
+        for (let i = joinList.length -1; i > -1; i--) {
+            let thisName = joinList[i].fieldId.replace(joinList[i].fieldId[0], joinList[i].fieldId[0].toUpperCase());
+            names.push(thisName);
+            let fullName = names.join("");
+            fullName = fullName.replace(fullName[0], fullName[0].toLowerCase());
+            joins[fullName] = joinList[i];
+        }
+    }
+
+    /**
+     * This function adds to the joins object.  Since conditions can have children
+     * which also have joins, this function is called recursively to get to the bottom
+     * of the rabbit hole.
+     *
+     * @param condition
+     * @param joins
+     */
+    const getJoinsForCondition = (condition, joins) => {
+        if (condition.column) {
+            getJoinsForColumn(condition.column, joins);
+        } else if (condition.children) {
+            condition.children.forEach((child)=>{
+                getJoinsForCondition(child, joins)
+            });
+        }
+    }
+
+    /**
+     * This is a top level function to compose a joins object which
+     * has joins from the (result) columns and from the condition columns.
+     * It is expect that some of these joins are going to be reused between
+     *
+     * @param dSet
+     * @returns {{}}
+     */
+    const getJoins = (dSet) => {
+        const joins = {};
+        dSet.columns.forEach((col)=>{
+            getJoinsForColumn(col, joins);
+        });
+        getJoinsForCondition(dSet.condition, joins);
+
+        return joins;
+    }
+
+    /**
+     * This function determines if two join objects are in fact equivalent, allowing
+     * for re-use of the joins between columns and conditions.
+     *
+     * @param a
+     * @param b
+     * @returns {*|boolean}
+     */
+    const joinsAreEqual = (a, b) => {
+        if (a.fieldId !== b.fieldId) {
+            return false;
+        }
+        if (a.source !== b.source) {
+            return false;
+        }
+        if (a.target !== b.target) {
+            return false;
+        }
+        if (!a.join && !b.join) {
+            return true;
+        }
+        if (Boolean(a.join) !== Boolean(b.join)) {
+            return false; // only one join has a child
+        }
+        return joinsAreEqual(a.join, b.join);
+    }
+
+    /**
+     * This function tries to match a join in a column to a join
+     * that is already defined in the joins object.
+     *
+     * @param column
+     * @param joins
+     * @returns {string|null}
+     */
+    const findJoinNameForColumn = (column, joins) => {
+        if (!column.join) {
+            return null;
+        }
+        for (let joinName in joins) {
+            if (joinsAreEqual(column.join, joins[joinName])) {
+                return joinName
+            }
+        }
+        return "Not found";
+    }
+
+    /**
+     * This function matches a given join object to an existing
+     * object defined in the joins list.
+     *
+     * @param join
+     * @param joins
+     * @returns {string}
+     */
+    const findJoinNameForJoin = (join, joins) => {
+        for (let joinName in joins) {
+            if (joinsAreEqual(join, joins[joinName])) {
+                return joinName
+            }
+        }
+        return "Not found";
+    }
+
+    /**
+     * This function composes html to define a joins object.
+     *
+     * @param ds
+     * @param joins
+     * @param indent
+     * @returns {string}
+     */
+    const renderJoins = (ds, joins, indent) => {
+        let joinNames = Object.keys(joins)
+        let html = `<br />
+        ${indent}\/\/Joins<br />${indent}const joins = {};<br />`;
+        let joinsHtml = []
+        let jIndent = indent + space(4);
+        joinNames.forEach((name)=> {
+            joinsHtml.push(renderJoin(joins[name], joins, jIndent));
+        });
+        html += joinsHtml.join("") + "<br />";
+        return html;
+    }
+
+    /**
+     * This function composes the html to render a join object (within the larger joins object)
+     *
+     * @param join
+     * @param joins
+     * @param indent
+     * @returns {string}
+     */
+    const renderJoin = (join, joins, indent) => {
+        let html = `${indent}joins["${findJoinNameForJoin(join, joins)}"] = dataset.createJoin({<br />`;
+        let fSpace = indent + space(4);
+        let properties = ['fieldId', 'source', 'target'];
+        properties.forEach((prop)=>{
+            if(join[prop]) {
+                html += `${fSpace}${prop}: "${join[prop]}",<br />`;
+            }
+        });
+        if (join.join) {
+            html += `${fSpace}join: joins["${findJoinNameForJoin(join.join, joins)}"]<br />`
+        }
+        html += `${indent}});<br />`;
+        return html;
+    }
+
+    /**
+     * This function gets the name for a column - which is to say the name that is the property
+     * for this column in the "columns" object we are creating to collect all columns.
+     *
+     * @param col
+     * @param joins
+     * @param columns
+     * @returns {*|string}
+     */
+    const getNameForColumn = (col, joins, columns) => {
+        let fieldId = col.fieldId;
+        if (col.formula) {
+            let formulasOfType = 0;
+            fieldId = `formula${col.type}_${formulasOfType}`;
+            while (columns[fieldId] && columns[fieldId].formula !== col.formula) {
+                formulasOfType++;
+                fieldId = `formula${col.type}_${formulasOfType}`;
+            }
+        }
+        let name = fieldId;
+        if (col.join) {
+            fieldId = fieldId.replace(fieldId[0], fieldId[0].toUpperCase());
+            name = findJoinNameForColumn(col, joins) + fieldId;
+        }
+        return name;
+    }
+
+    /**
+     * This function gets the columns in the dataset and  returns an object with
+     * column names
+     * @param ds
+     * @param joins
+     * @returns {{}}
+     */
+    const getColumns = (ds, joins) => {
+        const columns = {};
+        ds.columns.forEach((col)=>{
+            let colName = getNameForColumn(col, joins, columns);
+            col.colName = colName;
+            columns[colName] = col;
+        });
+        getColumnForCondition(ds.condition, joins, columns);
+        return columns;
+    }
+    const getColumnForCondition = (condition, joins, columns)=>{
+        if (condition.column) {
+            let colName = getNameForColumn(condition.column, joins, columns);
+            condition.column.colName = colName;
+            columns[colName] = condition.column;
+        } else if (condition.children.length) {
+            condition.children.forEach((cond)=>{
+                getColumnForCondition(cond, joins, columns);
+            });
+        }
+    }
+
+    /**
+     * This function creates an array of aliases for the (original) columns of the
+     * loaded dataset.
+     *
+     * This function works hard to avoid duplicate aliases, but please do yourself
+     * a favor and give your columns unique labels in the UI when saving the workbook
+     *
+     * @param columns
+     * @returns {*}
+     */
+    const getAliasesForColumns = (columns, joins) => {
+
+        const aliases = columns.map((column) => {
+
+            if (column.label) {
+                return column.label.toUpperCase().replace(/\s/g, "_");
+            }
+            // If no label, try and fall back to the field id
+            if (column.fieldId) {
+                return column.fieldId.toUpperCase();
+            }
+            // If no field id, this is a formula - compose something from its type
+            return `FORMULA_${column.type}`;
+        });
+
+        // Now ensure uniqueness of each member in the array
+        for (let i = 0; i < aliases.length; i++) {
+            let firstIndex = aliases.indexOf(aliases[i]);
+            if (firstIndex < i) {
+                aliases[firstIndex] = getNameForColumn(columns[firstIndex],joins, columns).toUpperCase();
+                aliases[i] = getNameForColumn(columns[i], joins, columns).toUpperCase();
+            }
+        }
+        return aliases;
+    }
+
+    const renderColumn = (col, indent, joins, columns, alias) => {
+        let fSpace = indent + space(4);
+
+        let properties = ['fieldId', 'formula', 'id', 'label', 'type'];
+
+        let html = `${indent}columns["${getNameForColumn(col, joins, columns)}"] = dataset.createColumn({<br />`;
+
+        properties.forEach((prop)=>{
+            if (col[prop]) {
+                html += `${fSpace}${prop}: "${col[prop]}",<br />`;
+            }
+        });
+        if (alias) {
+            html += `${fSpace}alias: "${alias}",<br />`;
+        } else {
+            html += `${fSpace}alias: "${col.alias}",<br />`;
+        }
+
+        if (col.join) {
+            html += `${fSpace}join: joins["${findJoinNameForColumn(col, joins)}"]<br />`;
+        }
+        html += `${indent}});<br />`;
+        return html;
+    }
+
+    const renderColumns = (columns, indent, joins, ds) => {
+
+        let html = `${indent}const columns = {};<br />`;
+        let innerIndent = indent;
+        let aliases = getAliasesForColumns(ds.columns, joins);
+
+        for (let colName in columns) {
+            let alias = null;
+            if (aliases.length) {
+                alias = aliases.shift();
+            }
+            html += renderColumn(columns[colName], innerIndent, joins, columns, alias);
+        }
+        html += `<br />`;
+        return html;
+    }
+
+    const renderCondition = (condition, indent) => {
+        let html = ``;
+        let childIndent = indent + space(4);
+        if (condition.children && condition.children.length) { //this is a logical operator level
+            html += `${indent}dataset.createCondition({<br />
+                    ${childIndent}operator: "${condition.operator}",<br />
+                    ${childIndent}children: [<br />`;
+            condition.children.forEach((child)=>{
+                html += renderCondition(child, childIndent + space(4));
+            });
+            html = html.replace(/,<br \/>$/, `<br />`);
+            html += `${childIndent}]<br />
+            ${indent}}),<br />`;
+
+        } else {
+            html += `${indent}dataset.createCondition({<br />
+                     ${childIndent}column: columns["${condition.column.colName}"],<br />
+                     ${childIndent}operator: "${condition.operator}",<br />
+                     ${childIndent}values: [${condition.values.join(",")}]<br />
+                     ${indent}}),<br />`
+        }
+
+        return html;
+    }
+
+    const renderResultColumns = (ds, columns, joins, indent) => {
+        let childIndent = indent + space(4);
+        let html = `${indent}\/\/ Columns returned in results <br />
+                    ${indent}const resultColumns = [<br />`;
+        ds.columns.forEach((col)=>{
+            html += `${childIndent}columns["${getNameForColumn(col, joins, columns)}"],<br />`;
+        });
+        html = trimComma(html);
+        html += `${indent}];<br /><br />`;
+        return html;
+    }
+
+    const renderCreateDataset = (ds, indent) => {
+        let html = ``;
+        const childIndent = `${indent + space(4)}`;
+        html += `${indent}const ds = dataset.create({<br />`;
+        html += `${childIndent}type: "${ds.type}",<br />`;
+        if (ds.condition) {
+            html += `${childIndent}condition,<br />`;
+        }
+        html += `${childIndent}columns: resultColumns,<br />`;
+        html += `${childIndent}description: "optional description",<br />`;
+        html += `${childIndent}id: "${ds.id}",<br />`;
+        html += `${childIndent}name: "${ds.name}"<br />`;
+        html += `${indent}});<br />`;
+        html += `<br />${indent}return ds;<br />`;
+
+        return html;
+    }
+
+    /**
+     * This function creates the code for a handy query utility function to get
+     * all results of a given query as mapped results.
+     *
+     * The resulting function is actually called at the top of this file, which
+     * is pretty meta when you think about it.
+     *
+     * @returns {string}
+     */
+    const renderGetResultsFunction = () => {
+        return `${space(4)}const getAllMappedResults = (wb) => {<br />
+            ${space(8)}const pageData = wb.runPaged({pageSize: 1000});<br />
+            ${space(8)}let allResults = [];<br />
+            ${space(8)}const allPages = [];<br />
+            ${space(8)}pageData.iterator().each((page)=>{<br />
+            ${space(12)}    let currentPage = page.value;<br />
+            ${space(12)}    allPages.push(currentPage.data);<br />
+            ${space(12)}    return true;<br />
+            ${space(8)}});<br />
+            ${space(8)}allPages.forEach((page) => {<br />
+            ${space(12)}    allResults = allResults.concat(page.asMappedResults());<br />
+            ${space(8)}});<br />
+            ${space(8)}return allResults;<br />
+             }<br />`;
+    }
+
+
+    const renderExportDataset = (ds) => {
+        const joins = getJoins(ds);
+        const columns = getColumns(ds, joins);
+        console.log('joins', joins);
+        console.log('columns', columns);
+        let html = ``;
+
+        html += `${space(4)}const createDataset = () => {<br />`;
+        html += renderJoins(ds, joins, space(8));
+        html += renderColumns(columns, space(8), joins, ds);
+        html += renderResultColumns(ds, columns, joins, space(8));
+        html += `${space(8)}const condition = <br />` + renderCondition(ds.condition, space(8));
+        html = trimComma(html);
+        html += renderCreateDataset(ds, space(8));
+        html += `${space(4)}};<br />`;
+        html += `\/\/ Function to get all results as mapped results<br />`;
+        html += renderGetResultsFunction();
+        html += `<br /><br />${space(4)}\/\/ getAllMappedResults(createDataset());<br />`;
+
+
+        return html;
+    }
+
+
+
+
+    const datasetId = getDatasetId(datasetName);
+    const ds = dataset.load({id: datasetId});
+    const html = renderExportDataset(ds);
+    const popup = window.open("", "_blank");
+    popup.document.body.innerHTML = html;
+    popup.document.title = 'Dataset Code';
+
+});
