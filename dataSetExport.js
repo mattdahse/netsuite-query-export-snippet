@@ -50,7 +50,7 @@ require(['N/query', 'N/dataset'], (query, dataset) => {
         });
 
         for (let i = 0; i < allResults.length; i++) {
-            if (allResults[i].name === name) {
+            if (allResults[i].name.replace(/\s/g, "") === name.replace(/\s/g, "")) {
                 return allResults[i].id;
             }
         }
@@ -273,6 +273,15 @@ require(['N/query', 'N/dataset'], (query, dataset) => {
         getColumnForCondition(ds.condition, joins, columns);
         return columns;
     }
+
+    /**
+     * This function will drill into a condition and its descendents to get the columns
+     * associated for each.
+     *
+     * @param condition
+     * @param joins
+     * @param columns
+     */
     const getColumnForCondition = (condition, joins, columns)=>{
         if (condition.column) {
             let colName = getNameForColumn(condition.column, joins, columns);
@@ -321,19 +330,31 @@ require(['N/query', 'N/dataset'], (query, dataset) => {
         return aliases;
     }
 
+
+    /**
+     * This function writes the html to create a column in the output.
+     *
+     * @param col
+     * @param indent
+     * @param joins
+     * @param columns
+     * @param alias
+     * @returns {string}
+     */
     const renderColumn = (col, indent, joins, columns, alias) => {
         let fSpace = indent + space(4);
 
         let properties = ['fieldId', 'formula', 'id', 'label', 'type'];
-
-        let html = `${indent}columns["${getNameForColumn(col, joins, columns)}"] = dataset.createColumn({<br />`;
+        let columnName = alias && alias.toUpperCase() === alias ? alias : getNameForColumn(col, joins, columns);
+        col.newAlias = columnName;
+        let html = `${indent}columns["${columnName}"] = dataset.createColumn({<br />`;
 
         properties.forEach((prop)=>{
             if (col[prop]) {
                 html += `${fSpace}${prop}: "${col[prop]}",<br />`;
             }
         });
-        if (alias) {
+        if (alias && alias != "null") {
             html += `${fSpace}alias: "${alias}",<br />`;
         } else {
             html += `${fSpace}alias: "${col.alias}",<br />`;
@@ -346,6 +367,16 @@ require(['N/query', 'N/dataset'], (query, dataset) => {
         return html;
     }
 
+    /**
+     * This function renders the columns object in a way that allows the columns to
+     * be recreated in code.
+     *
+     * @param columns
+     * @param indent
+     * @param joins
+     * @param ds
+     * @returns {string}
+     */
     const renderColumns = (columns, indent, joins, ds) => {
 
         let html = `${indent}const columns = {};<br />`;
@@ -381,7 +412,7 @@ require(['N/query', 'N/dataset'], (query, dataset) => {
             html += `${indent}dataset.createCondition({<br />
                      ${childIndent}column: columns["${condition.column.colName}"],<br />
                      ${childIndent}operator: "${condition.operator}",<br />
-                     ${childIndent}values: [${condition.values.join(",")}]<br />
+                     ${childIndent}values: ${condition.values && condition.values[0] || condition.values[0] === false || condition.values[0] === 0 ? JSON.stringify(condition.values) : "[]"}<br />
                      ${indent}}),<br />`
         }
 
@@ -393,7 +424,7 @@ require(['N/query', 'N/dataset'], (query, dataset) => {
         let html = `${indent}\/\/ Columns returned in results <br />
                     ${indent}const resultColumns = [<br />`;
         ds.columns.forEach((col)=>{
-            html += `${childIndent}columns["${getNameForColumn(col, joins, columns)}"],<br />`;
+            html += `${childIndent}columns["${col.newAlias}"],<br />`;
         });
         html = trimComma(html);
         html += `${indent}];<br /><br />`;
@@ -467,9 +498,6 @@ require(['N/query', 'N/dataset'], (query, dataset) => {
 
         return html;
     }
-
-
-
 
     const datasetId = getDatasetId(datasetName);
     const ds = dataset.load({id: datasetId});
