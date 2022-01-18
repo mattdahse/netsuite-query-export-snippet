@@ -243,7 +243,7 @@ require(['N/query', 'N/dataset'], (query, dataset) => {
         if (col.formula) {
             let formulasOfType = 0;
             fieldId = `formula${col.type}_${formulasOfType}`;
-            while (columns[fieldId] && columns[fieldId].formula !== col.formula) {
+            while (columns[fieldId.toUpperCase()] && columns[fieldId.toUpperCase()].formula !== col.formula) {
                 formulasOfType++;
                 fieldId = `formula${col.type}_${formulasOfType}`;
             }
@@ -253,7 +253,8 @@ require(['N/query', 'N/dataset'], (query, dataset) => {
             fieldId = fieldId.replace(fieldId[0], fieldId[0].toUpperCase());
             name = findJoinNameForColumn(col, joins) + fieldId;
         }
-        return name;
+        col.newAlias = name.toUpperCase();
+        return col.newAlias;
     }
 
     /**
@@ -309,7 +310,7 @@ require(['N/query', 'N/dataset'], (query, dataset) => {
         const aliases = columns.map((column) => {
 
             if (column.label) {
-                return column.label.toUpperCase().replace(/\s/g, "_");
+                return column.label.toUpperCase().replace(/[^\w]/g, "_");
             }
             // If no label, try and fall back to the field id
             if (column.fieldId) {
@@ -351,7 +352,13 @@ require(['N/query', 'N/dataset'], (query, dataset) => {
 
         properties.forEach((prop)=>{
             if (col[prop]) {
-                html += `${fSpace}${prop}: "${col[prop]}",<br />`;
+                if (prop === 'formula') {
+                    let safeFormula = col[prop].replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    html += `${fSpace}${prop}: "${safeFormula}",<br />`;
+                } else {
+                    html += `${fSpace}${prop}: "${col[prop]}",<br />`;
+                }
+
             }
         });
         if (alias && alias != "null") {
