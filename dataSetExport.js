@@ -253,6 +253,9 @@ require(['N/query', 'N/dataset'], (query, dataset) => {
             fieldId = fieldId.replace(fieldId[0], fieldId[0].toUpperCase());
             name = findJoinNameForColumn(col, joins) + fieldId;
         }
+        if (col.label) {
+            name = col.label;
+        }
         col.newAlias = name.toUpperCase();
         return col.newAlias;
     }
